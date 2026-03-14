@@ -74,66 +74,67 @@ folderRouter.get("/:tenant_id", async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 });
-// returning folders and files based on path
+// returning folders and files based on path --> GET /api/folders/:tenant_id/path?path=1/5/9
 folderRouter.get("/:tenant_id/path", async (req, res) => {
   const { tenant_id } = req.params;
-  const { path } = req.query; // expected as string like "1/2/5"
+  const { path } = req.query; // string like "1/5/9"
   const user_id = req.user.user_id;
 
-  if (!(await verifyTenantAccess(user_id, tenant_id)))
-    return res.status(403).json({ message: "Forbidden" });
-
   try {
-    // 1. Fetch all folders for the tenant
-    const { rows: folders } = await pool.query(
-      "SELECT * FROM folders WHERE tenant_id=$1 ORDER BY created_at ASC",
-      [tenant_id],
-    );
+    // 1. Verify user access to tenant
+    if (!(await verifyTenantAccess(user_id, tenant_id)))
+      return res.status(403).json({ message: "Forbidden" });
 
-    // 2. Map folders by ID
-    const map = {};
-    folders.forEach((f) => {
-      f.children = [];
-      map[String(f.id)] = f; // ensure string keys
-    });
+    // 2. Parse path
+    const pathArr =
+      typeof path === "string" && path.length > 0 ? path.split("/") : [];
+    const currentFolderId = pathArr.length
+      ? Number(pathArr[pathArr.length - 1])
+      : null;
 
-    // 3. Build tree structure
-    folders.forEach((f) => {
-      if (f.parent_id) map[String(f.parent_id)]?.children.push(f);
-    });
+    // 3. Fetch breadcrumb folders
+    let breadcrumb = [];
 
-    // 4. Resolve path
-    const pathArr = typeof path === "string" ? path.split("/") : [];
-    let currentFolder = null;
-    let level = folders.filter((f) => f.parent_id === null); // top-level
-    const breadcrumb = [];
-
-    for (const id of pathArr) {
-      const next = level.find((f) => String(f.id) === id);
-      if (!next) break;
-      breadcrumb.push(next);
-      currentFolder = next;
-      level = next.children;
+    if (pathArr.length) {
+      const breadcrumbRes = await pool.query(
+        `SELECT id, name FROM folders WHERE id = ANY($1::bigint[])`,
+        [pathArr.map(Number)],
+      );
+      const map = new Map(breadcrumbRes.rows.map((r) => [String(r.id), r]));
+      breadcrumb = pathArr.map((id) => map.get(id)).filter(Boolean);
     }
 
-    const childFolders = currentFolder
-      ? currentFolder.children
-      : folders.filter((f) => f.parent_id === null);
+    // 4. Fetch child folders
+    const foldersRes = await pool.query(
+      `SELECT id, name FROM folders
+       WHERE tenant_id = $1 AND parent_id ${currentFolderId ? "= $2" : "IS NULL"}
+       ORDER BY created_at ASC`,
+      currentFolderId ? [tenant_id, currentFolderId] : [tenant_id],
+    );
+    const folders = foldersRes.rows;
 
-    // 5. Load files for current folder
+    // 5. Fetch files in current folder
     let files = [];
-    if (currentFolder) {
+    if (currentFolderId) {
       const filesRes = await pool.query(
-        "SELECT f.*, ac.role FROM files f LEFT JOIN access_controls ac ON f.id=ac.file_id AND ac.user_id=$1 WHERE f.folder_id=$2 ORDER BY f.created_at ASC",
-        [user_id, currentFolder.id],
+        `SELECT f.*, ac.role
+         FROM files f
+         LEFT JOIN access_controls ac
+           ON f.id = ac.file_id AND ac.user_id = $1
+         WHERE f.folder_id = $2
+         ORDER BY f.created_at ASC`,
+        [user_id, currentFolderId],
       );
       files = filesRes.rows;
     }
 
+    // 6. Return same JSON shape as before
     res.json({
-      currentFolder,
+      currentFolder: breadcrumb.length
+        ? breadcrumb[breadcrumb.length - 1]
+        : null,
       breadcrumb,
-      folders: childFolders,
+      folders,
       files,
     });
   } catch (err) {

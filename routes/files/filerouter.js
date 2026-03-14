@@ -72,7 +72,62 @@ fileRouter.get("/edit-requests", getAllPendingRequestForOwner);
 // Owner: approve/reject requests
 fileRouter.post("/edit-requests/:id/approve", editReqAcceptHandler);
 fileRouter.delete("/edit-requests/:id", editReqRejectHandler);
+// Accept draft (owner)
+fileRouter.post("/drafts/:draft_id/accept", acceptDraftHandler);
+// getting a single draft with its content
+fileRouter.get("/drafts/:id", async (req, res) => {
+  const draftId = req.params.id;
 
+  try {
+    const result = await pool.query(
+      `SELECT d.*, u.username
+       FROM file_versions d
+       JOIN users u ON u.id = d.author_id
+       WHERE d.id = $1`,
+      [draftId],
+    );
+
+    if (!result.rows.length) {
+      return res.status(404).json({ message: "Draft not found" });
+    }
+
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+// Delete draft (owner or author)
+fileRouter.delete("/drafts/:draft_id", deleteDraftHandler);
+fileRouter.get("/:id/download", async (req, res) => {
+  const user_id = req.user.user_id;
+  const file_id = req.params.id;
+  try {
+    const fileRes = await pool.query(
+      `SELECT f.*
+      FROM files f
+      WHERE f.id = $1
+      `,
+      [file_id],
+    );
+    if (!fileRes.rows.length)
+      return res.status(404).json({ message: "File not found" });
+    const file = fileRes.rows[0];
+    if (!(await verifyTenantAccess(user_id, file.tenant_id)))
+      return res.status(403).json({ message: "Forbidden" });
+    // determining content type
+    const ext = file.name.endsWith(".md")
+      ? "text/markdown"
+      : "text/plain;charset=utf-8";
+    res.setHeader("Content-Type", ext);
+    res.setHeader("Content-Disposition", `attachment; filename="${file.name}"`);
+
+    res.send(file.content);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
 // Request edit access (non-editors)
 fileRouter.post("/:id/request-edit", async (req, res) => {
   const user_id = req.user.user_id;
@@ -193,11 +248,11 @@ fileRouter.post("/:id/grant-access", async (req, res) => {
 
     // Grant or update access
     await pool.query(
-      `INSERT INTO access_controls 
+      `INSERT INTO access_controls
         (tenant_id, user_id, file_id, role, granted_by)
        VALUES ($1,$2,$3,$4,$5)
        ON CONFLICT (user_id,file_id)
-       DO UPDATE SET 
+       DO UPDATE SET
          role = EXCLUDED.role,
          granted_by = EXCLUDED.granted_by`,
       [file.tenant_id, target_user_id, file.id, role, user_id],
@@ -255,33 +310,7 @@ fileRouter.post("/:id/draft", createUpdatedDraftHandler);
 
 // Get drafts for a file
 fileRouter.get("/:id/drafts", getDraftsOfAfile);
-// Accept draft (owner)
-fileRouter.post("/drafts/:draft_id/accept", acceptDraftHandler);
-// getting a single draft with its content
-fileRouter.get("/drafts/:id", async (req, res) => {
-  const draftId = req.params.id;
 
-  try {
-    const result = await pool.query(
-      `SELECT d.*, u.username
-       FROM file_versions d
-       JOIN users u ON u.id = d.author_id
-       WHERE d.id = $1`,
-      [draftId],
-    );
-
-    if (!result.rows.length) {
-      return res.status(404).json({ message: "Draft not found" });
-    }
-
-    res.json(result.rows[0]);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: "Server error" });
-  }
-});
-// Delete draft (owner or author)
-fileRouter.delete("/drafts/:draft_id", deleteDraftHandler);
 // Move file
 fileRouter.patch("/:id/move", async (req, res) => {
   const { new_folder_id } = req.body;
@@ -324,7 +353,7 @@ fileRouter.get("/:id", async (req, res) => {
 
   const fileRes = await pool.query(
     `
-      SELECT 
+      SELECT
         f.*,
         COALESCE(ac.role, 'viewer') AS role
       FROM files f

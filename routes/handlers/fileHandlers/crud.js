@@ -8,8 +8,26 @@ const {
 async function createFileHandler(req, res) {
   const { name, folder_id, content } = req.body;
   const user_id = req.user.user_id;
+
   if (!name || !folder_id)
     return res.status(400).json({ message: "Name and folder_id required" });
+
+  // sanitizing extension
+  const allowedExts = [".txt", ".md"];
+  let ext = name.includes(".")
+    ? name.slice(name.lastIndexOf(".")).toLowerCase()
+    : "";
+
+  if (!allowedExts.includes(ext)) {
+    // If no valid extension, default to .txt
+    ext = ".txt";
+  }
+
+  // Ensuring the final name has valid extension
+  const baseName = name.includes(".")
+    ? name.slice(0, name.lastIndexOf("."))
+    : name;
+  const finalName = baseName + ext;
 
   try {
     const folderRes = await pool.query(
@@ -23,10 +41,10 @@ async function createFileHandler(req, res) {
     if (!(await verifyTenantAccess(user_id, tenant_id)))
       return res.status(403).json({ message: "Forbidden" });
 
-    // Create file
+    // Create file with sanitized name
     const fileRes = await pool.query(
       "INSERT INTO files (tenant_id, folder_id, name, content) VALUES ($1,$2,$3,$4) RETURNING *",
-      [tenant_id, folder_id, name, content || ""],
+      [tenant_id, folder_id, finalName, content || ""],
     );
     const file = fileRes.rows[0];
 
@@ -42,6 +60,7 @@ async function createFileHandler(req, res) {
     res.status(500).json({ message: "Server error", error: err.message });
   }
 }
+
 async function getFilesInFolder(req, res) {
   const { folder_id } = req.query;
   const user_id = req.user.user_id;
