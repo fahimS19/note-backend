@@ -62,7 +62,14 @@ authRouter.post("/login", async (req, res) => {
 });
 // logout user
 authRouter.post("/logout", (_req, res) => {
-  res.clearCookie("token").json({ message: "Logged out" });
+  res
+    .clearCookie("token", {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "none",
+      path: "/",
+    })
+    .json({ message: "Logged out" });
 });
 // getting current user info
 authRouter.get("/me", authMiddleware, async (req, res) => {
