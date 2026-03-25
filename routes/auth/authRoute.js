@@ -50,8 +50,8 @@ authRouter.post("/login", async (req, res) => {
     res
       .cookie("token", token, {
         httpOnly: true,
-        secure: false, // true in production (https)
-        sameSite: "lax",
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "none",
         maxAge: 1000 * 60 * 60 * 24, // 1 day
       })
       .json({ message: "Login successful" });
