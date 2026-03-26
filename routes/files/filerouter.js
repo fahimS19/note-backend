@@ -6,6 +6,7 @@ const {
   verifyTenantAccess,
   getFileById,
   isOwner,
+  getFileRole,
 } = require("../helpers/role-ownership");
 const { uploadHandler } = require("../handlers/uploadHandler.js");
 const {
@@ -25,13 +26,13 @@ const {
   acceptDraftHandler,
   deleteDraftHandler,
 } = require("../handlers/fileHandlers/draft");
-// ----------------------- SETUP -----------------------
+// upload middleware
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 2 * 1024 * 1024 }, // 2MB max
 });
 
-// ----------------------- FILE CRUD -----------------------
+//  FILE CRUD
 // FILE UPLOAD
 fileRouter.post("/upload", upload.single("file"), uploadHandler);
 // Create file
