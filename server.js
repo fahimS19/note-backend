@@ -27,6 +27,7 @@ app.use(
 );
 app.use(express.json());
 app.use(cookieParser());
+app.set("trust proxy", 1);
 app.use("/api/", apiLimiter);
 app.use("/api/auth", authRouter);
 app.use("/api/tenants", authMiddleware, tenantRouter);
